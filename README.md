@@ -1,16 +1,16 @@
-# OpenGL Example
+# OpenGL Win32 Example
 
 ## About
-OpenGL Example is a program that creates a window with OpenGL context. It is programmed using Win32 API.
+OpenGL Win32 Example is a program that creates a window with OpenGL context. It is programmed using Win32 API.
 
-OpenGL Example is published on <https://github.com/vbsw/OpenGLExample>.
+OpenGL Win32 Example is published on <https://github.com/vbsw/opengl-win32-example>.
 
 ## Copyright
 Copyright 2018, Vitali Baumtrok (vbsw@mailbox.org).
 
-OpenGL Example is distributed under the Boost Software License, version 1.0. (See accompanying file LICENSE or copy at <http://www.boost.org/LICENSE_1_0.txt>)
+OpenGL Win32 Example is distributed under the Boost Software License, version 1.0. (See accompanying file LICENSE or copy at <http://www.boost.org/LICENSE_1_0.txt>)
 
-OpenGL Example is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the Boost Software License for more details.
+OpenGL Win32 Example is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the Boost Software License for more details.
 
 ## Installation
 In Visual Studio right click on project and select properties. Add "OpenGL32.lib;GLu32.lib;" to additional dependencies.
