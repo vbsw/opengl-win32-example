@@ -18,6 +18,28 @@ HWND    hWnd;				/* window */
 LPCWSTR szWindowClass = L"OpenGL";
 LPCWSTR szTitle       = L"Example";
 
+void MessageToString(WCHAR *str, size_t strSize, UINT uMsg)
+{
+	swprintf_s(str, strSize, L"message ");
+	switch (uMsg)
+	{
+	case WM_PRINT: swprintf_s(str + 8, strSize - 8, L"%d (WM_PRINT)\n", (int)(uMsg)); break;
+	case WM_PRINTCLIENT: swprintf_s(str + 8, strSize - 8, L"%d (WM_PRINTCLIENT)\n", (int)(uMsg)); break;
+	case WM_PAINT: swprintf_s(str + 8, strSize - 8, L"%d (WM_PAINT)\n", (int)(uMsg)); break;
+	case WM_SIZE: swprintf_s(str + 8, strSize - 8, L"%d (WM_SIZE)\n", (int)(uMsg)); break;
+	case WM_CHAR: swprintf_s(str + 8, strSize - 8, L"%d (WM_CHAR)\n", (int)(uMsg)); break;
+	case WM_CLOSE: swprintf_s(str + 8, strSize - 8, L"%d (WM_CLOSE)\n", (int)(uMsg)); break;
+	case WM_QUIT: swprintf_s(str + 8, strSize - 8, L"%d (WM_QUIT)\n", (int)(uMsg)); break;
+	case WM_DESTROY: swprintf_s(str + 8, strSize - 8, L"%d (WM_DESTROY)\n", (int)(uMsg)); break;
+	case WM_MOUSEMOVE: swprintf_s(str + 8, strSize - 8, L"%d (WM_MOUSEMOVE)\n", (int)(uMsg)); break;
+	case WM_SETCURSOR: swprintf_s(str + 8, strSize - 8, L"%d (WM_SETCURSOR)\n", (int)(uMsg)); break;
+	case WM_NCHITTEST: swprintf_s(str + 8, strSize - 8, L"%d (WM_NCHITTEST)\n", (int)(uMsg)); break;
+	case WM_NCMOUSEMOVE: swprintf_s(str + 8, strSize - 8, L"%d (WM_NCMOUSEMOVE)\n", (int)(uMsg)); break;
+	case WM_NCMOUSELEAVE: swprintf_s(str + 8, strSize - 8, L"%d (WM_NCMOUSELEAVE)\n", (int)(uMsg)); break;
+	default: swprintf_s(str + 8, strSize - 8, L"%d ( )\n", (int)(uMsg)); break;
+	}
+}
+
 void DrawGraphics()
 {
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -34,6 +56,10 @@ void DrawGraphics()
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+	WCHAR str[40];
+	MessageToString(str, 40, message);
+	OutputDebugStringW(str);
+
 	switch (message)
 	{
 	case WM_PAINT:
