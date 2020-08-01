@@ -20,4 +20,3 @@ In Visual Studio right click on project and select properties. Add "OpenGL32.lib
 - <https://docs.microsoft.com/en-us/windows/desktop/learnwin32/closing-the-window>
 - <https://www.opengl.org/archives/resources/code/samples/win32_tutorial/>
 - <http://nehe.gamedev.net/tutorial/creating_an_opengl_window_win32/13001/>
-- <https://github.com/alexkaratarakis/gitattributes>
