@@ -6,10 +6,6 @@
  */
 
 #include "stdafx.h"
-#include <Windows.h>
-#include <stdio.h>
-#include <gl/GL.h>
-#include <gl/GLU.h>
 
 HDC     hDC;				/* device context */
 HGLRC   hRC;				/* render context (opengl context) */

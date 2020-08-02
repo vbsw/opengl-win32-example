@@ -9,13 +9,12 @@
 
 #define WIN32_LEAN_AND_MEAN             // Selten verwendete Komponenten aus Windows-Headern ausschließen
 // Windows-Headerdateien
-#include <windows.h>
+#include <Windows.h>
 
 // C RunTime-Headerdateien
-#include <stdlib.h>
-#include <malloc.h>
-#include <memory.h>
-#include <tchar.h>
+#include <stdio.h>
+#include <gl/GL.h>
+#include <gl/GLU.h>
 
 
 // Hier auf zusätzliche Header verweisen, die das Programm benötigt.
