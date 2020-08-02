@@ -13,7 +13,7 @@ OpenGL Win32 Example is distributed under the Boost Software License, version 1.
 OpenGL Win32 Example is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the Boost Software License for more details.
 
 ## Installation
-In Visual Studio right click on project and select properties. Add "OpenGL32.lib;GLu32.lib;" to additional dependencies.
+In Visual Studio right click on project and select properties. Add "OpenGL32.lib;GLu32.lib;" for additional dependencies.
 
 ## References
 - <https://git-scm.com/book/en/v2/Getting-Started-Installing-Git>
