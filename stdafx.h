@@ -9,7 +9,7 @@
 
 #define WIN32_LEAN_AND_MEAN             // Selten verwendete Komponenten aus Windows-Headern ausschließen
 // Windows-Headerdateien
-#include <Windows.h>
+#include <windows.h>
 
 // C RunTime-Headerdateien
 #include <stdio.h>
