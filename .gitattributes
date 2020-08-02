@@ -1,0 +1,10 @@
+# Sources
+*.c     diff
+*.cc    diff
+*.cxx   diff
+*.cpp   diff
+*.c++   diff
+*.hpp   diff
+*.h     diff
+*.h++   diff
+*.hh    diff

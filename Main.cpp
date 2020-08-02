@@ -18,6 +18,13 @@ HWND    hWnd;				/* window */
 LPCWSTR szWindowClass = L"OpenGL";
 LPCWSTR szTitle       = L"Example";
 
+WORD width;
+WORD height;
+WORD prevX;
+WORD prevY;
+WORD prevWidth;
+WORD prevHeight;
+
 void MessageToString(WCHAR *str, size_t strSize, UINT uMsg)
 {
 	swprintf_s(str, strSize, L"message ");
@@ -67,6 +74,39 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		DrawGraphics();
 		hDC = BeginPaint(hWnd, &ps);
 		EndPaint(hWnd, &ps);
+		break;
+	case WM_SYSKEYUP:
+		switch (wParam)
+		{
+		case 121: /* F10 */
+			DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
+			if (dwStyle & WS_OVERLAPPEDWINDOW)
+			{
+				RECT rect;
+				DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
+				MONITORINFO mi = { sizeof(mi) };
+				GetWindowRect(hWnd, &rect);
+				prevX = rect.left;
+				prevY = rect.top;
+				prevWidth = rect.right - rect.left;
+				prevHeight = rect.bottom - rect.top;
+
+				GetMonitorInfo(MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+				SetWindowLong(hWnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+				SetWindowPos(hWnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+				                             mi.rcMonitor.right - mi.rcMonitor.left,
+				                             mi.rcMonitor.bottom - mi.rcMonitor.top,
+				                             SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+			}
+			else
+			{
+				DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
+				MONITORINFO mi = { sizeof(mi) };
+				GetMonitorInfo(MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+				SetWindowLong(hWnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+				SetWindowPos(hWnd, HWND_NOTOPMOST, prevX, prevY, prevWidth, prevHeight, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+			}
+		}
 		break;
 	case WM_SIZE:
 		glViewport(0, 0, LOWORD(lParam), HIWORD(lParam));
