@@ -12,10 +12,5 @@
 #include <windows.h>
 
 // C RunTime-Headerdateien
-#include <stdlib.h>
-#include <malloc.h>
-#include <memory.h>
-#include <tchar.h>
-
 
 // Hier auf zusätzliche Header verweisen, die das Programm benötigt.
