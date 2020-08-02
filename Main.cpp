@@ -76,8 +76,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 		case 27: /* ESC key */
 			PostMessage(hWnd, WM_CLOSE, 0, 0);
-			break;
 		}
+		break;
 	case WM_CLOSE:
 		wglMakeCurrent(hDC, NULL);
 		wglDeleteContext(hRC);
@@ -94,7 +94,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 ATOM MyRegisterClass(HINSTANCE hInstance)
 {
 	WNDCLASSEXW wcex;
-	ATOM blaa;
 
 	wcex.cbSize = sizeof(WNDCLASSEX);
 	wcex.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;

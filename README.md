@@ -1,7 +1,7 @@
 # OpenGL Win32 Example
 
 ## About
-OpenGL Win32 Example is a program that creates a window with OpenGL context. It is programmed using Win32 API.
+OpenGL Win32 Example is a program that creates a window with OpenGL 1.0 context. It is programmed using Win32 API. The example for OpenGL 3.0 you find on [another branch](https://github.com/vbsw/opengl-win32-example/tree/3.0).
 
 OpenGL Win32 Example is published on <https://github.com/vbsw/opengl-win32-example>.
 
@@ -19,4 +19,3 @@ In Visual Studio right click on project and select properties. Add "OpenGL32.lib
 - <https://git-scm.com/book/en/v2/Getting-Started-Installing-Git>
 - <https://docs.microsoft.com/en-us/windows/desktop/learnwin32/closing-the-window>
 - <https://www.opengl.org/archives/resources/code/samples/win32_tutorial/>
-- <http://nehe.gamedev.net/tutorial/creating_an_opengl_window_win32/13001/>
