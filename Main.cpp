@@ -1,49 +1,42 @@
 /*
- *          Copyright 2019, Vitali Baumtrok.
+ *          Copyright 2020, Vitali Baumtrok.
  * Distributed under the Boost Software License, Version 1.0.
  *     (See accompanying file LICENSE or copy at
  *        http://www.boost.org/LICENSE_1_0.txt)
  */
 
-#include "stdafx.h"
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <stdio.h>
+#include <gl/GL.h>
 
-HDC     hDC;				/* device context */
-HGLRC   hRC;				/* render context (opengl context) */
-HWND    hWnd;				/* window */
+#define ERR_NONE 0
+#define ERR_REGCLS 1
+#define ERR_CRWIN_AWR 2
+#define ERR_CRWIN 3
+#define ERR_DC 4
+#define ERR_CPF 5
+#define ERR_SPF 6
+#define ERR_RC 7
 
-LPCWSTR szWindowClass = L"OpenGL";
-LPCWSTR szTitle       = L"Example";
+struct {
+	int code;
+	LPCWSTR message;
+} err = { ERR_NONE, nullptr };
 
-WORD width;
-WORD height;
-WORD prevX;
-WORD prevY;
-WORD prevWidth;
-WORD prevHeight;
+struct {
+	LPCWSTR className;
+	LPCSTR classNameChar;
+	LPCWSTR title;
+	HWND hndl;
+	HDC deviceContext;
+	HGLRC renderContext;
+	int prevX, prevY, width, height, prevWidth, prevHeight, resX, resY;
+	bool fullscreen;
+} window = { L"OpenGL", "OpenGL", L"OpenGL Example", nullptr, nullptr, nullptr, 0, 0, 0, 0, 0, 0, 640, 480, false };
 
-void MessageToString(WCHAR *str, size_t strSize, UINT uMsg)
-{
-	swprintf_s(str, strSize, L"message ");
-	switch (uMsg)
-	{
-	case WM_PRINT: swprintf_s(str + 8, strSize - 8, L"%d (WM_PRINT)\n", (int)(uMsg)); break;
-	case WM_PRINTCLIENT: swprintf_s(str + 8, strSize - 8, L"%d (WM_PRINTCLIENT)\n", (int)(uMsg)); break;
-	case WM_PAINT: swprintf_s(str + 8, strSize - 8, L"%d (WM_PAINT)\n", (int)(uMsg)); break;
-	case WM_SIZE: swprintf_s(str + 8, strSize - 8, L"%d (WM_SIZE)\n", (int)(uMsg)); break;
-	case WM_CHAR: swprintf_s(str + 8, strSize - 8, L"%d (WM_CHAR)\n", (int)(uMsg)); break;
-	case WM_CLOSE: swprintf_s(str + 8, strSize - 8, L"%d (WM_CLOSE)\n", (int)(uMsg)); break;
-	case WM_QUIT: swprintf_s(str + 8, strSize - 8, L"%d (WM_QUIT)\n", (int)(uMsg)); break;
-	case WM_DESTROY: swprintf_s(str + 8, strSize - 8, L"%d (WM_DESTROY)\n", (int)(uMsg)); break;
-	case WM_MOUSEMOVE: swprintf_s(str + 8, strSize - 8, L"%d (WM_MOUSEMOVE)\n", (int)(uMsg)); break;
-	case WM_SETCURSOR: swprintf_s(str + 8, strSize - 8, L"%d (WM_SETCURSOR)\n", (int)(uMsg)); break;
-	case WM_NCHITTEST: swprintf_s(str + 8, strSize - 8, L"%d (WM_NCHITTEST)\n", (int)(uMsg)); break;
-	case WM_NCMOUSEMOVE: swprintf_s(str + 8, strSize - 8, L"%d (WM_NCMOUSEMOVE)\n", (int)(uMsg)); break;
-	case WM_NCMOUSELEAVE: swprintf_s(str + 8, strSize - 8, L"%d (WM_NCMOUSELEAVE)\n", (int)(uMsg)); break;
-	default: swprintf_s(str + 8, strSize - 8, L"%d ( )\n", (int)(uMsg)); break;
-	}
-}
-
-void DrawGraphics()
+static void
+draw()
 {
 	glClear(GL_COLOR_BUFFER_BIT);
 	glBegin(GL_TRIANGLES);
@@ -57,183 +50,232 @@ void DrawGraphics()
 	glFlush();
 }
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+static void
+setFullscreen(bool fullscreen)
 {
-	WCHAR str[40];
-	MessageToString(str, 40, message);
-	OutputDebugStringW(str);
+	DWORD style = GetWindowLong(window.hndl, GWL_STYLE);
+	if (fullscreen)
+	{
+		RECT rect;
+		MONITORINFO mi = { sizeof(mi) };
+		GetWindowRect(window.hndl, &rect);
+		window.prevX = rect.left;
+		window.prevY = rect.top;
+		window.prevWidth = rect.right - rect.left;
+		window.prevHeight = rect.bottom - rect.top;
 
+		GetMonitorInfo(MonitorFromWindow(window.hndl, MONITOR_DEFAULTTOPRIMARY), &mi);
+		SetWindowLong(window.hndl, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
+		SetWindowPos(window.hndl, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+			mi.rcMonitor.right - mi.rcMonitor.left,
+			mi.rcMonitor.bottom - mi.rcMonitor.top,
+			SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+	}
+	else
+	{
+		MONITORINFO mi = { sizeof(mi) };
+		UINT flags = SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW;
+		GetMonitorInfo(MonitorFromWindow(window.hndl, MONITOR_DEFAULTTOPRIMARY), &mi);
+		SetWindowLong(window.hndl, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
+		SetWindowPos(window.hndl, HWND_NOTOPMOST, window.prevX, window.prevY, window.prevWidth, window.prevHeight, flags);
+	}
+}
+
+static int counter = 0;
+
+static LRESULT CALLBACK
+wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	LRESULT result = 0;
 	switch (message)
 	{
 	case WM_PAINT:
 		PAINTSTRUCT ps;
-		DrawGraphics();
-		hDC = BeginPaint(hWnd, &ps);
+		draw();
+		BeginPaint(hWnd, &ps);
 		EndPaint(hWnd, &ps);
-		break;
-	case WM_SYSKEYUP:
-		switch (wParam)
-		{
-		case 121: /* F10 */
-			DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
-			if (dwStyle & WS_OVERLAPPEDWINDOW)
-			{
-				RECT rect;
-				DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
-				MONITORINFO mi = { sizeof(mi) };
-				GetWindowRect(hWnd, &rect);
-				prevX = rect.left;
-				prevY = rect.top;
-				prevWidth = rect.right - rect.left;
-				prevHeight = rect.bottom - rect.top;
-
-				GetMonitorInfo(MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY), &mi);
-				SetWindowLong(hWnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
-				SetWindowPos(hWnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
-				                             mi.rcMonitor.right - mi.rcMonitor.left,
-				                             mi.rcMonitor.bottom - mi.rcMonitor.top,
-				                             SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-			}
-			else
-			{
-				DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
-				MONITORINFO mi = { sizeof(mi) };
-				GetMonitorInfo(MonitorFromWindow(hWnd, MONITOR_DEFAULTTOPRIMARY), &mi);
-				SetWindowLong(hWnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
-				SetWindowPos(hWnd, HWND_NOTOPMOST, prevX, prevY, prevWidth, prevHeight, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-			}
-		}
 		break;
 	case WM_SIZE:
 		glViewport(0, 0, LOWORD(lParam), HIWORD(lParam));
 		break;
-	case WM_CHAR:
-		switch (wParam)
-		{
-		case 27: /* ESC key */
+	case WM_KEYDOWN:
+		/* ESC */
+		if (wParam == 27)
 			PostMessage(hWnd, WM_CLOSE, 0, 0);
-		}
+		/* F11 */
+		else if (wParam == 122)
+			setFullscreen(window.fullscreen = !window.fullscreen);
 		break;
 	case WM_CLOSE:
-		wglMakeCurrent(hDC, NULL);
-		wglDeleteContext(hRC);
-		ReleaseDC(hWnd, hDC);
+		wglMakeCurrent(window.deviceContext, NULL);
+		wglDeleteContext(window.renderContext);
+		ReleaseDC(hWnd, window.deviceContext);
 		DestroyWindow(hWnd);
+		/* stop event queue thread */
 		PostQuitMessage(0);
 		break;
 	default:
-		return DefWindowProc(hWnd, message, wParam, lParam);
+		result = DefWindowProc(hWnd, message, wParam, lParam);
 	}
-	return 0;
+	return result;
 }
 
-ATOM MyRegisterClass(HINSTANCE hInstance)
+static void
+registerClass(HINSTANCE instance)
 {
 	WNDCLASSEXW wcex;
-
+	memset(&wcex, 0, sizeof(wcex));
 	wcex.cbSize = sizeof(WNDCLASSEX);
-	wcex.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-	wcex.lpfnWndProc = (WNDPROC) WndProc; // event handler
+	wcex.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+	wcex.lpfnWndProc = (WNDPROC)wndProc;
 	wcex.cbClsExtra = 0;
 	wcex.cbWndExtra = 0;
-	wcex.hInstance = hInstance;
+	wcex.hInstance = instance;
 	wcex.hIcon = LoadIcon(NULL, IDI_WINLOGO);
 	wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wcex.hbrBackground = NULL;
 	wcex.lpszMenuName = NULL;
-	wcex.lpszClassName = szWindowClass;
+	wcex.lpszClassName = window.className;
 	wcex.hIconSm = NULL;
 
-	return RegisterClassExW(&wcex);
+	if (!RegisterClassExW(&wcex))
+	{
+		err.code = ERR_REGCLS;
+		err.message = L"RegisterClassExW() failed: Can not register window class.";
+	}
 }
 
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
+static void
+createWindow(HINSTANCE instance)
 {
-	DWORD  dwStyle;
-	int    x = 0;
-	int    y = 0;
-	int    width = 256;
-	int    height = 256;
-
-	dwStyle = WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
-	hWnd = CreateWindowW(szWindowClass, szTitle, dwStyle, x, y, width, height, nullptr, nullptr, hInstance, nullptr);
-	if (!hWnd)
+	if (err.code == ERR_NONE)
 	{
-		return FALSE;
+		DWORD  style = WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+		RECT rect = { 0, 0, window.resX, window.resY };
+
+		if (AdjustWindowRect(&rect, style, false))
+		{
+			/* compute window size including border */
+			window.width = rect.right - rect.left;
+			window.height = rect.bottom - rect.top;
+
+			window.hndl = CreateWindowW(window.className, window.title, style, 0, 0, window.width, window.height, nullptr, nullptr, instance, nullptr);
+			if (!window.hndl)
+			{
+				err.code = ERR_CRWIN;
+				err.message = L"CreateWindowW() failed: Can not create window.";
+			}
+		}
+		else
+		{
+			err.code = ERR_CRWIN_AWR;
+			err.message = L"AdjustWindowRect() failed: Can not create window.";
+		}
 	}
-	return TRUE;
 }
 
-BOOL CreateRenderContext()
+static void
+centerWindow()
 {
-	PIXELFORMATDESCRIPTOR pixelFormatDescriptor;
-	int                   pixelFormat;
-
-	hDC = GetDC(hWnd);
-
-	/* Initialize bits to 0. */
-	memset(&pixelFormatDescriptor, 0, sizeof(PIXELFORMATDESCRIPTOR));
-
-	pixelFormatDescriptor.nSize = sizeof(PIXELFORMATDESCRIPTOR);
-	pixelFormatDescriptor.nVersion = 1;
-	pixelFormatDescriptor.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
-	pixelFormatDescriptor.iPixelType = PFD_TYPE_RGBA;
-	pixelFormatDescriptor.cColorBits = 32;
-	pixelFormat = ChoosePixelFormat(hDC, &pixelFormatDescriptor);
-
-	if (pixelFormat == 0)
+	if (err.code == ERR_NONE)
 	{
-		MessageBox(NULL, L"ChoosePixelFormat() failed: Can not find a suitable pixel format.", L"Error", MB_OK);
-		return FALSE;
-	}
-	if (SetPixelFormat(hDC, pixelFormat, &pixelFormatDescriptor) == FALSE)
-	{
-		MessageBox(NULL, L"SetPixelFormat() failed: Can not set format specified.", L"Error", MB_OK);
-		return FALSE;
-	}
-	DescribePixelFormat(hDC, pixelFormat, sizeof(PIXELFORMATDESCRIPTOR), &pixelFormatDescriptor);
-	hRC = wglCreateContext(hDC);
+		RECT rect;
+		MONITORINFO mi = { sizeof(mi) };
 
-	return (hRC != NULL);
+		GetMonitorInfo(MonitorFromWindow(window.hndl, MONITOR_DEFAULTTONEAREST), &mi);
+		int x = (mi.rcMonitor.right - mi.rcMonitor.left - window.width) / 2;
+		int y = (mi.rcMonitor.bottom - mi.rcMonitor.top - window.height) / 2;
+
+		SetWindowPos(window.hndl, 0, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW);
+	}
 }
 
-int APIENTRY wWinMain(_In_     HINSTANCE hInstance,
-                      _In_opt_ HINSTANCE hPrevInstance,
-                      _In_     LPWSTR    lpCmdLine,
-                      _In_     int       nCmdShow)
+static void
+createContext()
+{
+	if (err.code == ERR_NONE)
+	{
+		window.deviceContext = GetDC(window.hndl);
+		if (window.deviceContext)
+		{
+			int pixelFormat;
+			PIXELFORMATDESCRIPTOR pixelFormatDesc;
+
+			/* initialize bits to 0 */
+			memset(&pixelFormatDesc, 0, sizeof(PIXELFORMATDESCRIPTOR));
+			pixelFormatDesc.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+			pixelFormatDesc.nVersion = 1;
+			pixelFormatDesc.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
+			pixelFormatDesc.iPixelType = PFD_TYPE_RGBA;
+			pixelFormatDesc.cColorBits = 32;
+			pixelFormatDesc.cAlphaBits = 8;
+			pixelFormatDesc.cDepthBits = 24;
+
+			pixelFormat = ChoosePixelFormat(window.deviceContext, &pixelFormatDesc);
+			if (pixelFormat)
+			{
+				if (SetPixelFormat(window.deviceContext, pixelFormat, &pixelFormatDesc))
+				{
+					window.renderContext = wglCreateContext(window.deviceContext);
+					if (!window.renderContext)
+					{
+						err.code = ERR_RC;
+						err.message = L"wglCreateContext() failed: Can not create render context.";
+					}
+				}
+				else
+				{
+					err.code = ERR_SPF;
+					err.message = L"SetPixelFormat() failed: Can not create context.";
+				}
+			}
+			else
+			{
+				err.code = ERR_CPF;
+				err.message = L"ChoosePixelFormat() failed: Can not create context.";
+			}
+		}
+		else
+		{
+			err.code = ERR_DC;
+			err.message = L"GetDC() failed: Can not create device context.";
+		}
+	}
+}
+
+int APIENTRY
+wWinMain(_In_     HINSTANCE hInstance,
+         _In_opt_ HINSTANCE hPrevInstance,
+         _In_     LPWSTR    lpCmdLine,
+         _In_     int       nCmdShow)
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 
-	if (!MyRegisterClass(hInstance))
+	registerClass(hInstance);
+	createWindow(hInstance);
+	createContext();
+
+	if (err.code == ERR_NONE)
 	{
-		MessageBox(NULL, L"RegisterClass() failed: Cannot create a window.", L"Error", MB_OK);
-		return FALSE;
+		wglMakeCurrent(window.deviceContext, window.renderContext);
+		ShowWindow(window.hndl, nCmdShow);
+		centerWindow();
+		UpdateWindow(window.hndl);
+
+		MSG msg;
+		while (GetMessage(&msg, nullptr, 0, 0))
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+	}
+	else
+	{
+		wchar_t *title = new wchar_t[10];
+		swprintf_s(title, 10, L"Error %d", err.code);
+		MessageBox(NULL, err.message, title, MB_OK);
 	}
 
-	if (!InitInstance(hInstance, nCmdShow))
-	{
-		MessageBox(NULL, L"CreateWindow() failed: Can not create a window.", L"Error", MB_OK);
-		return FALSE;
-	}
-	if (!CreateRenderContext())
-	{
-		MessageBox(NULL, L"wglCreateContext() failed: Can not create an OpenGL context.", L"Error", MB_OK);
-		return FALSE;
-	}
-
-	wglMakeCurrent(hDC, hRC);
-	ShowWindow(hWnd, nCmdShow);
-	UpdateWindow(hWnd);
-
-	MSG msg;
-
-	/* main loop */
-	while (GetMessage(&msg, nullptr, 0, 0))
-	{
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-	}
-
-	return (int)msg.wParam;
+	return err.code;
 }
