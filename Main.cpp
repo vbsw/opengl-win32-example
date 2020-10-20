@@ -81,8 +81,6 @@ setFullscreen(bool fullscreen)
 	}
 }
 
-static int counter = 0;
-
 static LRESULT CALLBACK
 wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
