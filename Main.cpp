@@ -139,7 +139,7 @@ registerClass(HINSTANCE instance)
 	if (!RegisterClassExW(&wcex))
 	{
 		err.code = ERR_REGCLS;
-		err.message = L"RegisterClassExW() failed: Can not register window class.";
+		err.message = L"RegisterClassExW failed: Can not register window class.";
 	}
 }
 
@@ -161,13 +161,13 @@ createWindow(HINSTANCE instance)
 			if (!window.hndl)
 			{
 				err.code = ERR_CRWIN;
-				err.message = L"CreateWindowW() failed: Can not create window.";
+				err.message = L"CreateWindowW failed: Can not create window.";
 			}
 		}
 		else
 		{
 			err.code = ERR_CRWIN_AWR;
-			err.message = L"AdjustWindowRect() failed: Can not create window.";
+			err.message = L"AdjustWindowRect failed: Can not create window.";
 		}
 	}
 }
@@ -218,25 +218,25 @@ createContext()
 					if (!window.renderContext)
 					{
 						err.code = ERR_RC;
-						err.message = L"wglCreateContext() failed: Can not create render context.";
+						err.message = L"wglCreateContext failed: Can not create render context.";
 					}
 				}
 				else
 				{
 					err.code = ERR_SPF;
-					err.message = L"SetPixelFormat() failed: Can not create context.";
+					err.message = L"SetPixelFormat failed: Can not create render context.";
 				}
 			}
 			else
 			{
 				err.code = ERR_CPF;
-				err.message = L"ChoosePixelFormat() failed: Can not create context.";
+				err.message = L"ChoosePixelFormat failed: Can not create render context.";
 			}
 		}
 		else
 		{
 			err.code = ERR_DC;
-			err.message = L"GetDC() failed: Can not create device context.";
+			err.message = L"GetDC failed: Can not create device context.";
 		}
 	}
 }
