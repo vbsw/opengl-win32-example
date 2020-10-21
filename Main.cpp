@@ -5,12 +5,35 @@
  *        http://www.boost.org/LICENSE_1_0.txt)
  */
 
-#include "stdafx.h"
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <stdio.h>
 #include <gl/GL.h>
 
- /* copied from wglext.h */
+#define ERR_NONE 0
+#define ERR_REGCLS 1
+#define ERR_CRWIN_FC 2
+#define ERR_DC_FC 3
+#define ERR_CPF_FC 4
+#define ERR_SPF_FC 5
+#define ERR_RC_FC 6
+#define ERR_CRWIN_AWR 7
+#define ERR_CRWIN 8
+#define ERR_DC 9
+#define ERR_PADRCPFARB 10
+#define ERR_PADRCCAARB 11
+#define ERR_CPFARB 12
+#define ERR_SPF 13
+#define ERR_CCAARB 14
+#define ERR_CSV 15
+#define ERR_CSF 16
+#define ERR_LP 17
+#define ERR_VP 18
+
+/* copied from wglext.h */
 typedef BOOL(WINAPI * PFNWGLCHOOSEPIXELFORMATARBPROC) (HDC hdc, const int *piAttribIList, const FLOAT *pfAttribFList, UINT nMaxFormats, int *piFormats, UINT *nNumFormats);
 typedef HGLRC(WINAPI * PFNWGLCREATECONTEXTATTRIBSARBPROC) (HDC hDC, HGLRC hShareContext, const int *attribList);
+typedef BOOL(WINAPI * PFNWGLSWAPINTERVALEXTPROC) (int interval);
 #define WGL_SAMPLE_BUFFERS_ARB            0x2041
 #define WGL_SAMPLES_ARB                   0x2042
 #define WGL_DRAW_TO_WINDOW_ARB            0x2001
@@ -27,6 +50,9 @@ typedef HGLRC(WINAPI * PFNWGLCREATECONTEXTATTRIBSARBPROC) (HDC hDC, HGLRC hShare
 #define WGL_CONTEXT_MINOR_VERSION_ARB     0x2092
 #define WGL_CONTEXT_PROFILE_MASK_ARB      0x9126
 #define WGL_CONTEXT_CORE_PROFILE_BIT_ARB  0x00000001
+#define WGL_SWAP_EXCHANGE_ARB             0x2028
+#define WGL_SWAP_METHOD_ARB               0x2007
+#define WGL_SWAP_COPY_ARB                 0x2029
 
 /* copied from glcorearb.h */
 #define APIENTRYP APIENTRY *
@@ -93,387 +119,579 @@ PFNGLDELETEVERTEXARRAYSPROC                     glDeleteVertexArrays;
 PFNGLDELETEBUFFERSPROC                          glDeleteBuffers;
 PFNGLDELETEPROGRAMPROC                          glDeleteProgram;
 PFNGLDELETESHADERPROC                           glDeleteShader;
+PFNWGLSWAPINTERVALEXTPROC                       wglSwapIntervalEXT = nullptr;
 
-const char *const vertex_shader = "#version 130\n\nin vec3 positionIn;\nin vec4 colorIn;\nout vec4 fragementColor;\n\nuniform mat4 projection = mat4(1.0);\nuniform mat4 model = mat4(1.0);\n\nvoid main() {\n\tgl_Position = projection * model * vec4(positionIn, 1.0f);\n\tfragementColor = colorIn;\n}";
-const char *const fragment_shader = "#version 130\n\nin vec4 fragementColor;\nout vec4 color;\n\nvoid main() {\n\tcolor = fragementColor;\n}";
+struct {
+	const char *vertex, *fragment;
+	GLuint vertexId, fragmentId;
+} shader = { "#version 130\n\nin vec3 positionIn;\nin vec4 colorIn;\nout vec4 fragementColor;\n\nuniform mat4 projection = mat4(1.0);\nuniform mat4 model = mat4(1.0);\n\nvoid main() {\n\tgl_Position = projection * model * vec4(positionIn, 1.0f);\n\tfragementColor = colorIn;\n}",
+			 "#version 130\n\nin vec4 fragementColor;\nout vec4 color;\n\nvoid main() {\n\tcolor = fragementColor;\n}",
+             0, 0 };
 
-GLuint fragmentShaderID;
-GLuint vertexShaderID;
-GLuint programID;
-GLuint vbo;
-GLuint vao;
+struct {
+	GLuint id, vbo, vao;
+} program = { 0, 0, 0 };
 
-HDC     hDC;				/* device context */
-HGLRC   hRC;				/* render context (opengl context) */
-HWND    hWnd;				/* window */
+struct {
+	int code;
+	LPCWSTR message;
+} err = { ERR_NONE, nullptr };
 
-LPCWSTR szWindowClass = L"OpenGL";
-LPCWSTR szTitle = L"Example";
+struct {
+	HWND hndl;
+	HDC deviceContext;
+	HGLRC renderContext;
+} fakeWindow = { nullptr, nullptr, nullptr };
 
-void DrawGraphics()
+struct {
+	LPCWSTR className;
+	LPCSTR classNameChar;
+	LPCWSTR title;
+	HWND hndl;
+	HDC deviceContext;
+	HGLRC renderContext;
+	int prevX, prevY, width, height, prevWidth, prevHeight, resX, resY;
+	bool fullscreen, visible;
+} window = { L"OpenGL", "OpenGL", L"OpenGL Example", nullptr, nullptr, nullptr, 0, 0, 0, 0, 0, 0, 640, 480, false, false };
+
+static PROC
+getProc(LPCSTR procName, int errCode, LPCWSTR errMessage)
 {
-	glClearColor(0, 0, 0, 0);
-	glClear(GL_COLOR_BUFFER_BIT);
-	glDrawArrays(GL_TRIANGLES, 0, 3);
-	SwapBuffers(hDC);
+	PROC proc = nullptr;
+	if (err.code == ERR_NONE)
+	{
+		proc = wglGetProcAddress(procName);
+		if (!proc)
+		{
+			err.code = errCode;
+			err.message = errMessage;
+		}
+	}
+	return proc;
 }
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+static void
+checkShader(GLuint shaderId)
 {
+	if (err.code == ERR_NONE)
+	{
+		GLint result;
+		glGetShaderiv(shaderId, GL_COMPILE_STATUS, &result);
+		if (result == FALSE)
+		{
+			GLsizei length;
+			glGetShaderiv(shaderId, GL_INFO_LOG_LENGTH, &length);
+			if (length > 0)
+			{
+				GLchar *infoLog = new GLchar[length];
+				WCHAR *msg = new WCHAR[length];
+				glGetShaderInfoLog(shaderId, length, &length, infoLog);
+				MultiByteToWideChar(CP_ACP, 0, infoLog, -1, (LPWSTR)msg, length + 1);
+				err.message = msg;
+				delete[] infoLog;
+			}
+			else if (shader.vertexId == shaderId)
+				err.message = L"glCompileShader failed: Can not compile vertex shader.";
+			else
+				err.message = L"glCompileShader failed: Can not compile fragmet shader.";
+			if (shader.vertexId == shaderId)
+				err.code = ERR_CSV;
+			else
+				err.code = ERR_CSV;
+		}
+	}
+}
+
+static void
+checkProgram(GLuint shaderId, GLenum param)
+{
+	if (err.code == ERR_NONE)
+	{
+		GLint result;
+		glGetProgramiv(shaderId, param, &result);
+		if (result == FALSE)
+		{
+			GLsizei length;
+			glGetProgramiv(shaderId, GL_INFO_LOG_LENGTH, &length);
+			if (length > 0)
+			{
+				GLchar *infoLog = new GLchar[length];
+				WCHAR *msg = new WCHAR[length];
+				glGetProgramInfoLog(shaderId, length, &length, infoLog);
+				MultiByteToWideChar(CP_ACP, 0, infoLog, -1, (LPWSTR)msg, length + 1);
+				err.message = msg;
+				delete[] infoLog;
+			}
+			else if (param == GL_LINK_STATUS)
+				err.message = L"glLinkProgram failed: Can not link program.";
+			else
+				err.message = L"glValidateProgram() failed: Can not execute shader program.";
+			if (param == GL_LINK_STATUS)
+				err.code = ERR_LP;
+			else
+				err.code = ERR_VP;
+		}
+	}
+}
+
+static void
+centerWindow()
+{
+	if (err.code == ERR_NONE)
+	{
+		RECT rect;
+		MONITORINFO mi = { sizeof(mi) };
+
+		GetMonitorInfo(MonitorFromWindow(window.hndl, MONITOR_DEFAULTTONEAREST), &mi);
+		int x = (mi.rcMonitor.right - mi.rcMonitor.left - window.width) / 2;
+		int y = (mi.rcMonitor.bottom - mi.rcMonitor.top - window.height) / 2;
+
+		SetWindowPos(window.hndl, 0, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW);
+	}
+}
+
+static void
+setFullscreen(bool fullscreen)
+{
+	DWORD style = GetWindowLong(window.hndl, GWL_STYLE);
+	if (fullscreen)
+	{
+		RECT rect;
+		MONITORINFO mi = { sizeof(mi) };
+		GetWindowRect(window.hndl, &rect);
+		window.prevX = rect.left;
+		window.prevY = rect.top;
+		window.prevWidth = rect.right - rect.left;
+		window.prevHeight = rect.bottom - rect.top;
+
+		GetMonitorInfo(MonitorFromWindow(window.hndl, MONITOR_DEFAULTTOPRIMARY), &mi);
+		SetWindowLong(window.hndl, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
+		SetWindowPos(window.hndl, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+			mi.rcMonitor.right - mi.rcMonitor.left,
+			mi.rcMonitor.bottom - mi.rcMonitor.top,
+			SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+	}
+	else
+	{
+		MONITORINFO mi = { sizeof(mi) };
+		UINT flags = SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW;
+		GetMonitorInfo(MonitorFromWindow(window.hndl, MONITOR_DEFAULTTOPRIMARY), &mi);
+		SetWindowLong(window.hndl, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
+		SetWindowPos(window.hndl, HWND_NOTOPMOST, window.prevX, window.prevY, window.prevWidth, window.prevHeight, flags);
+	}
+}
+
+static void
+draw()
+{
+	glClearColor(1, 1, 1, 0);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+	//glFlush();
+	SwapBuffers(window.deviceContext);
+}
+
+static LRESULT CALLBACK
+wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	LRESULT result = 0;
 	switch (message)
 	{
-	case WM_PAINT:
-		PAINTSTRUCT ps;
-		DrawGraphics();
-		hDC = BeginPaint(hWnd, &ps);
-		EndPaint(hWnd, &ps);
-		break;
 	case WM_SIZE:
 		glViewport(0, 0, LOWORD(lParam), HIWORD(lParam));
+		draw();
 		break;
-	case WM_CHAR:
-		switch (wParam)
-		{
-		case 27: /* ESC key */
+	case WM_KEYDOWN:
+		/* ESC */
+		if (wParam == 27)
 			PostMessage(hWnd, WM_CLOSE, 0, 0);
-		}
+		/* F11 */
+		else if (wParam == 122)
+			setFullscreen(window.fullscreen = !window.fullscreen);
 		break;
 	case WM_CLOSE:
-		glDeleteVertexArrays(1, &vao);
-		glDeleteBuffers(1, &vbo);
-		glDeleteProgram(programID);
-		glDeleteShader(vertexShaderID);
-		glDeleteShader(fragmentShaderID);
-		wglMakeCurrent(hDC, NULL);
-		wglDeleteContext(hRC);
-		ReleaseDC(hWnd, hDC);
+		window.visible = false;
+		wglMakeCurrent(window.deviceContext, NULL);
+		wglDeleteContext(window.renderContext);
+		ReleaseDC(hWnd, window.deviceContext);
 		DestroyWindow(hWnd);
+		/* stop event queue thread */
 		PostQuitMessage(0);
 		break;
 	default:
-		return DefWindowProc(hWnd, message, wParam, lParam);
+		result = DefWindowProc(hWnd, message, wParam, lParam);
 	}
-	return 0;
+	return result;
 }
 
-
-ATOM MyRegisterClass(HINSTANCE hInstance)
+static void
+registerClass(HINSTANCE instance)
 {
 	WNDCLASSEXW wcex;
-	/* Initialize bits to 0. */
 	memset(&wcex, 0, sizeof(wcex));
-
 	wcex.cbSize = sizeof(WNDCLASSEX);
-	wcex.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
-	wcex.lpfnWndProc = (WNDPROC)WndProc; // event handler
+	wcex.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+	wcex.lpfnWndProc = (WNDPROC)wndProc;
 	wcex.cbClsExtra = 0;
 	wcex.cbWndExtra = 0;
-	wcex.hInstance = hInstance;
+	wcex.hInstance = instance;
 	wcex.hIcon = LoadIcon(NULL, IDI_WINLOGO);
 	wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
 	wcex.hbrBackground = NULL;
 	wcex.lpszMenuName = NULL;
-	wcex.lpszClassName = szWindowClass;
+	wcex.lpszClassName = window.className;
 	wcex.hIconSm = NULL;
 
-	return RegisterClassExW(&wcex);
+	if (!RegisterClassExW(&wcex))
+	{
+		err.code = ERR_REGCLS;
+		err.message = L"RegisterClassExW() failed: Can not register window class.";
+	}
 }
 
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
+static void
+createFakeWindow(HINSTANCE instance)
 {
-	DWORD  dwStyle;
-	int    x = 0;
-	int    y = 0;
-	int    width = 256;
-	int    height = 256;
-
-	dwStyle = WS_OVERLAPPEDWINDOW | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
-	hWnd = CreateWindowW(szWindowClass, szTitle, dwStyle, x, y, width, height, nullptr, nullptr, hInstance, nullptr);
-	if (!hWnd)
+	if (err.code == ERR_NONE)
 	{
-		return FALSE;
-	}
-	return TRUE;
-}
-
-BOOL CreateRenderContext(HINSTANCE hInstance)
-{
-	/* ------------------------------------------- */
-	/*             create fake context             */
-	/* ------------------------------------------- */
-
-	HWND                  hFakeWnd;
-	HDC                   hFakeDC;
-	PIXELFORMATDESCRIPTOR fakePFD;
-	int                   fakePixelFormat;
-	HGLRC                 hFakeRC;
-
-	PFNWGLCHOOSEPIXELFORMATARBPROC    wglChoosePixelFormatARB;
-	PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB;
-
-	hFakeWnd = CreateWindowW(szWindowClass, L"Fake Window", WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, 1, 1, nullptr, nullptr, hInstance, nullptr);
-	if (!hFakeWnd)
-	{
-		MessageBox(NULL, L"CreateWindow() failed: Can not create a fake window.", L"Error", MB_OK);
-		return FALSE;
-	}
-	hFakeDC = GetDC(hFakeWnd);
-
-	/* Initialize bits to 0. */
-	memset(&fakePFD, 0, sizeof(PIXELFORMATDESCRIPTOR));
-	fakePFD.nSize = sizeof(PIXELFORMATDESCRIPTOR);
-	fakePFD.nVersion = 1;
-	fakePFD.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
-	fakePFD.iPixelType = PFD_TYPE_RGBA;
-	fakePFD.cColorBits = 32;
-	fakePFD.cAlphaBits = 8;
-	fakePFD.cDepthBits = 24;
-	fakePixelFormat = ChoosePixelFormat(hFakeDC, &fakePFD);
-	if (!fakePixelFormat)
-	{
-		MessageBox(NULL, L"ChoosePixelFormat() failed: Can not find a suitable fake pixel format.", L"Error", MB_OK);
-		return FALSE;
-	}
-	if (!SetPixelFormat(hFakeDC, fakePixelFormat, &fakePFD))
-	{
-		MessageBox(NULL, L"SetPixelFormat() failed: Can not set fake pixel format.", L"Error", MB_OK);
-		return FALSE;
-	}
-	hFakeRC = wglCreateContext(hFakeDC);
-	wglMakeCurrent(hFakeDC, hFakeRC);
-
-	wglChoosePixelFormatARB = reinterpret_cast<PFNWGLCHOOSEPIXELFORMATARBPROC>(wglGetProcAddress("wglChoosePixelFormatARB"));
-	if (!wglChoosePixelFormatARB)
-	{
-		MessageBox(NULL, L"wglGetProcAddress() failed: Can not find wglChoosePixelFormatARB.", L"Error", MB_OK);
-		return FALSE;
-	}
-	wglCreateContextAttribsARB = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(wglGetProcAddress("wglCreateContextAttribsARB"));
-	if (!wglCreateContextAttribsARB)
-	{
-		MessageBox(NULL, L"wglGetProcAddress() failed: Can not find wglCreateContextAttribsARB.", L"Error", MB_OK);
-		return FALSE;
-	}
-
-	/* ------------------------------------------- */
-	/*             create true context             */
-	/* ------------------------------------------- */
-
-	PIXELFORMATDESCRIPTOR pixelFormatDescriptor;
-	int                   pixelFormat;
-	BOOL                  status;
-	UINT                  numFormats;
-	const int pixelAttribs[] = {
-		WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
-		WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
-		WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
-		WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
-		WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
-		WGL_COLOR_BITS_ARB, 32,
-		WGL_ALPHA_BITS_ARB, 8,
-		WGL_DEPTH_BITS_ARB, 24,
-		WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
-		WGL_SAMPLES_ARB, 4,
-		0
-	};
-	int  contextAttributes[] = {
-		WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-		WGL_CONTEXT_MINOR_VERSION_ARB, 0,
-		WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
-		0
-	};
-
-	hDC = GetDC(hWnd);
-	status = wglChoosePixelFormatARB(hDC, pixelAttribs, NULL, 1, &pixelFormat, &numFormats);
-
-	if (status == FALSE || numFormats == 0)
-	{
-		MessageBox(NULL, L"wglChoosePixelFormatARB() failed: Can not find a suitable pixel format.", L"Error", MB_OK);
-		return FALSE;
-	}
-	/* Initialize bits to 0. */
-	memset(&pixelFormatDescriptor, 0, sizeof(PIXELFORMATDESCRIPTOR));
-	DescribePixelFormat(hDC, pixelFormat, sizeof(PIXELFORMATDESCRIPTOR), &pixelFormatDescriptor);
-
-	if (SetPixelFormat(hDC, pixelFormat, &pixelFormatDescriptor) == FALSE)
-	{
-		MessageBox(NULL, L"SetPixelFormat() failed: Can not set format specified.", L"Error", MB_OK);
-		return FALSE;
-	}
-	hRC = wglCreateContextAttribsARB(hDC, 0, contextAttributes);
-
-	/* ------------------------------------------- */
-	/*            clean up fake context            */
-	/* ------------------------------------------- */
-
-	wglMakeCurrent(hFakeDC, NULL);
-	wglDeleteContext(hFakeRC);
-	ReleaseDC(hFakeWnd, hFakeDC);
-	DestroyWindow(hFakeWnd);
-
-	return (hRC != NULL);
-}
-
-void InitGLFunctions()
-{
-	glCreateShader = reinterpret_cast<PFNGLCREATESHADERPROC>(wglGetProcAddress("glCreateShader"));
-	glShaderSource = reinterpret_cast<PFNGLSHADERSOURCEPROC>(wglGetProcAddress("glShaderSource"));
-	glCompileShader = reinterpret_cast<PFNGLCOMPILESHADERPROC>(wglGetProcAddress("glCompileShader"));
-	glGetShaderiv = reinterpret_cast<PFNGLGETSHADERIVPROC>(wglGetProcAddress("glGetShaderiv"));
-	glGetShaderInfoLog = reinterpret_cast<PFNGLGETSHADERINFOLOGPROC>(wglGetProcAddress("glGetShaderInfoLog"));
-	glCreateProgram = reinterpret_cast<PFNGLCREATEPROGRAMPROC>(wglGetProcAddress("glCreateProgram"));
-	glAttachShader = reinterpret_cast<PFNGLATTACHSHADERPROC>(wglGetProcAddress("glAttachShader"));
-	glLinkProgram = reinterpret_cast<PFNGLLINKPROGRAMPROC>(wglGetProcAddress("glLinkProgram"));
-	glValidateProgram = reinterpret_cast<PFNGLVALIDATEPROGRAMPROC>(wglGetProcAddress("glValidateProgram"));
-	glGetProgramiv = reinterpret_cast<PFNGLGETPROGRAMIVPROC>(wglGetProcAddress("glGetProgramiv"));
-	glGenBuffers = reinterpret_cast<PFNGLGENBUFFERSPROC>(wglGetProcAddress("glGenBuffers"));
-	glGenVertexArrays = reinterpret_cast<PFNGLGENVERTEXARRAYSPROC>(wglGetProcAddress("glGenVertexArrays"));
-	glGetAttribLocation = reinterpret_cast<PFNGLGETATTRIBLOCATIONPROC>(wglGetProcAddress("glGetAttribLocation"));
-	glBindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(wglGetProcAddress("glBindVertexArray"));
-	glEnableVertexAttribArray = reinterpret_cast<PFNGLENABLEVERTEXATTRIBARRAYPROC>(wglGetProcAddress("glEnableVertexAttribArray"));
-	glVertexAttribPointer = reinterpret_cast<PFNGLVERTEXATTRIBPOINTERPROC>(wglGetProcAddress("glVertexAttribPointer"));
-	glBindBuffer = reinterpret_cast<PFNGLBINDBUFFERPROC>(wglGetProcAddress("glBindBuffer"));
-	glBufferData = reinterpret_cast<PFNGLBUFFERDATAPROC>(wglGetProcAddress("glBufferData"));
-	glGetVertexAttribPointerv = reinterpret_cast<PFNGLGETVERTEXATTRIBPOINTERVPROC>(wglGetProcAddress("glGetVertexAttribPointerv"));
-	glUseProgram = reinterpret_cast<PFNGLUSEPROGRAMPROC>(wglGetProcAddress("glUseProgram"));
-	glDeleteVertexArrays = reinterpret_cast<PFNGLDELETEVERTEXARRAYSPROC>(wglGetProcAddress("glDeleteVertexArrays"));
-	glDeleteBuffers = reinterpret_cast<PFNGLDELETEBUFFERSPROC>(wglGetProcAddress("glDeleteBuffers"));
-	glDeleteProgram = reinterpret_cast<PFNGLDELETEPROGRAMPROC>(wglGetProcAddress("glDeleteProgram"));
-	glDeleteShader = reinterpret_cast<PFNGLDELETESHADERPROC>(wglGetProcAddress("glDeleteShader"));
-}
-
-void checkShader(GLuint shaderID)
-{
-	GLint result;
-	glGetShaderiv(shaderID, GL_COMPILE_STATUS, &result);
-	if (result == FALSE)
-	{
-		GLsizei length;
-		glGetShaderiv(shaderID, GL_INFO_LOG_LENGTH, &length);
-		if (length > 0)
+		fakeWindow.hndl = CreateWindowW(window.className, L"Fake Window", WS_OVERLAPPEDWINDOW, 0, 0, 1, 1, nullptr, nullptr, instance, nullptr);
+		if (!fakeWindow.hndl)
 		{
-			GLchar *infoLog = new GLchar[length];
-			WCHAR *msg = new WCHAR[length];
-			glGetShaderInfoLog(shaderID, length, &length, infoLog);
-			MultiByteToWideChar(CP_ACP, 0, infoLog, -1, (LPWSTR)msg, length + 1);
-			MessageBox(NULL, msg, L"Error", MB_OK);
-			delete infoLog;
-			delete msg;
+			err.code = ERR_CRWIN_FC;
+			err.message = L"CreateWindowW() failed: Can not create fake window.";
+		}
+	}
+}
+
+static void
+createFakeContext()
+{
+	if (err.code == ERR_NONE)
+	{
+		fakeWindow.deviceContext = GetDC(fakeWindow.hndl);
+		if (fakeWindow.deviceContext)
+		{
+			int pixelFormat;
+			PIXELFORMATDESCRIPTOR pixelFormatDesc;
+			memset(&pixelFormatDesc, 0, sizeof(PIXELFORMATDESCRIPTOR));
+			pixelFormatDesc.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+			pixelFormatDesc.nVersion = 1;
+			pixelFormatDesc.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
+			pixelFormatDesc.iPixelType = PFD_TYPE_RGBA;
+			pixelFormatDesc.cColorBits = 32;
+			pixelFormatDesc.cAlphaBits = 8;
+			pixelFormatDesc.cDepthBits = 24;
+			pixelFormat = ChoosePixelFormat(fakeWindow.deviceContext, &pixelFormatDesc);
+			if (pixelFormat)
+			{
+				if (SetPixelFormat(fakeWindow.deviceContext, pixelFormat, &pixelFormatDesc))
+				{
+					fakeWindow.renderContext = wglCreateContext(fakeWindow.deviceContext);
+					if (!fakeWindow.renderContext)
+					{
+						err.code = ERR_RC_FC;
+						err.message = L"wglCreateContext() failed: Can not create fake render context.";
+					}
+				}
+				else
+				{
+					err.code = ERR_SPF_FC;
+					err.message = L"SetPixelFormat() failed: Can not create fake render context.";
+				}
+			}
+			else
+			{
+				err.code = ERR_CPF_FC;
+				err.message = L"ChoosePixelFormat() failed: Can not create fake render context.";
+			}
 		}
 		else
-			MessageBox(NULL, L"glCompileShader() failed", L"Error", MB_OK);
-		/* TODO: program stop */
+		{
+			err.code = ERR_DC_FC;
+			err.message = L"GetDC() failed: Can not create fake device context.";
+		}
 	}
 }
 
-void checkProgram(GLuint shaderID, GLenum pname)
+static void
+destroyFakeWindow()
 {
-	GLint result;
-	glGetProgramiv(shaderID, pname, &result);
-	if (result == FALSE)
+	if (err.code == ERR_NONE)
 	{
-		GLsizei length;
-		glGetProgramiv(shaderID, GL_INFO_LOG_LENGTH, &length);
-		if (length > 0)
+		wglMakeCurrent(fakeWindow.deviceContext, NULL);
+		wglDeleteContext(fakeWindow.renderContext);
+		ReleaseDC(fakeWindow.hndl, fakeWindow.deviceContext);
+		DestroyWindow(fakeWindow.hndl);
+	}
+	else
+	{
+		if (err.code > ERR_DC_FC)
+			ReleaseDC(fakeWindow.hndl, fakeWindow.deviceContext);
+		if (err.code > ERR_CRWIN_FC)
+			DestroyWindow(fakeWindow.hndl);
+	}
+	fakeWindow.renderContext = nullptr;
+	fakeWindow.deviceContext = nullptr;
+	fakeWindow.hndl = nullptr;
+}
+
+static void
+createWindow(HINSTANCE instance)
+{
+	if (err.code == ERR_NONE)
+	{
+		window.fullscreen = false;
+
+		RECT rect = { 0, 0, window.resX, window.resY };
+		DWORD style = WS_OVERLAPPEDWINDOW;
+		if (AdjustWindowRect(&rect, style, false))
 		{
-			GLchar *infoLog = new GLchar[length];
-			WCHAR *msg = new WCHAR[length];
-			glGetProgramInfoLog(shaderID, length, &length, infoLog);
-			MultiByteToWideChar(CP_ACP, 0, infoLog, -1, (LPWSTR)msg, length + 1);
-			MessageBox(NULL, msg, L"Error", MB_OK);
-			delete infoLog;
-			delete msg;
+			/* compute window size including border */
+			window.width = rect.right - rect.left;
+			window.height = rect.bottom - rect.top;
+
+			window.hndl = CreateWindowW(window.className, window.title, style, 0, 0, window.width, window.height, nullptr, nullptr, instance, nullptr);
+			if (!window.hndl)
+			{
+				err.code = ERR_CRWIN;
+				err.message = L"CreateWindowW() failed: Can not create window.";
+			}
 		}
 		else
-			MessageBox(NULL, L"glLinkProgram() or glValidateProgram() failed", L"Error", MB_OK);
-		/* TODO: program stop */
+		{
+			err.code = ERR_CRWIN_AWR;
+			err.message = L"AdjustWindowRect() failed: Can not create window.";
+		}
 	}
 }
 
-void InitShaders()
+static void
+createContext()
 {
-	vertexShaderID = glCreateShader(GL_VERTEX_SHADER);
-	fragmentShaderID = glCreateShader(GL_FRAGMENT_SHADER);
+	if (err.code == ERR_NONE)
+	{
+		window.deviceContext = GetDC(window.hndl);
+		if (window.deviceContext)
+		{
+			PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB;
+			PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB;
 
-	glShaderSource(vertexShaderID, 1, &vertex_shader, NULL);
-	glShaderSource(fragmentShaderID, 1, &fragment_shader, NULL);
+			wglMakeCurrent(fakeWindow.deviceContext, fakeWindow.renderContext);
 
-	glCompileShader(vertexShaderID);
-	glCompileShader(fragmentShaderID);
+			wglChoosePixelFormatARB = reinterpret_cast<PFNWGLCHOOSEPIXELFORMATARBPROC>(getProc("wglChoosePixelFormatARB", ERR_PADRCPFARB, L"wglGetProcAddress() failed: Can not find wglChoosePixelFormatARB."));
+			wglCreateContextAttribsARB = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(getProc("wglCreateContextAttribsARB", ERR_PADRCCAARB, L"wglGetProcAddress() failed: Can not find wglCreateContextAttribsARB."));
+			wglSwapIntervalEXT = reinterpret_cast<PFNWGLSWAPINTERVALEXTPROC>(getProc("wglSwapIntervalEXT", ERR_NONE, L""));
 
-	checkShader(vertexShaderID);
-	checkShader(fragmentShaderID);
+			if (err.code == ERR_NONE)
+			{
+				int pixelFormat;
+				BOOL status;
+				UINT numFormats;
+				const int pixelAttribs[] = {
+					WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+					WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+					WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+					/* WGL_SWAP_EXCHANGE_ARB causes problems with window menu in fullscreen */
+					WGL_SWAP_METHOD_ARB, WGL_SWAP_COPY_ARB,
+					WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+					WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+					WGL_COLOR_BITS_ARB, 32,
+					WGL_ALPHA_BITS_ARB, 8,
+					WGL_DEPTH_BITS_ARB, 24,
+					0
+				};
+				int  contextAttributes[] = {
+					WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+					WGL_CONTEXT_MINOR_VERSION_ARB, 0,
+					WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+					0
+				};
+				status = wglChoosePixelFormatARB(window.deviceContext, pixelAttribs, nullptr, 1, &pixelFormat, &numFormats);
+				if (status && numFormats)
+				{
+					PIXELFORMATDESCRIPTOR pfd;
+					memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
+					DescribePixelFormat(window.deviceContext, pixelFormat, sizeof(PIXELFORMATDESCRIPTOR), &pfd);
 
-	programID = glCreateProgram();
-	glAttachShader(programID, vertexShaderID);
-	glAttachShader(programID, fragmentShaderID);
-	glLinkProgram(programID);
-	checkProgram(programID, GL_LINK_STATUS);
-	glValidateProgram(programID);
-	checkProgram(programID, GL_VALIDATE_STATUS);
-
-	GLint positionLocation = glGetAttribLocation(programID, "positionIn");
-	GLint colorLocation = glGetAttribLocation(programID, "colorIn");
-
-	glGenBuffers(1, &vbo);
-	glGenVertexArrays(1, &vao);
-
-	// x, y, z, r, g, b (triangle)
-	float vertices[] = {
-		0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0,
-		1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0,
-		-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0,
-	};
-	glBindVertexArray(vao);
-	glEnableVertexAttribArray(positionLocation);
-	glEnableVertexAttribArray(colorLocation);
-
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-	glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(0));
-	glVertexAttribPointer(colorLocation, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(3 * sizeof(float)));
-
-	glUseProgram(programID);
+					if (SetPixelFormat(window.deviceContext, pixelFormat, &pfd))
+					{
+						window.renderContext = wglCreateContextAttribsARB(window.deviceContext, 0, contextAttributes);
+						if (!window.renderContext)
+						{
+							err.code = ERR_CCAARB;
+							err.message = L"wglCreateContextAttribsARB() failed: Can not create context.";
+						}
+					}
+					else
+					{
+						err.code = ERR_SPF;
+						err.message = L"SetPixelFormat() failed: Can not create context.";
+					}
+				}
+				else
+				{
+					err.code = ERR_CPFARB;
+					err.message = L"wglChoosePixelFormatARB() failed: Can not create context.";
+				}
+			}
+		}
+		else
+		{
+			err.code = ERR_DC;
+			err.message = L"GetDC() failed: Can not create context.";
+		}
+	}
 }
 
-int APIENTRY wWinMain(_In_     HINSTANCE hInstance,
-                      _In_opt_ HINSTANCE hPrevInstance,
-                      _In_     LPWSTR    lpCmdLine,
-                      _In_     int       nCmdShow)
+static void
+initOpenGLFunctions()
+{
+	if (err.code == ERR_NONE)
+	{
+		glCreateShader = reinterpret_cast<PFNGLCREATESHADERPROC>(wglGetProcAddress("glCreateShader"));
+		glShaderSource = reinterpret_cast<PFNGLSHADERSOURCEPROC>(wglGetProcAddress("glShaderSource"));
+		glCompileShader = reinterpret_cast<PFNGLCOMPILESHADERPROC>(wglGetProcAddress("glCompileShader"));
+		glGetShaderiv = reinterpret_cast<PFNGLGETSHADERIVPROC>(wglGetProcAddress("glGetShaderiv"));
+		glGetShaderInfoLog = reinterpret_cast<PFNGLGETSHADERINFOLOGPROC>(wglGetProcAddress("glGetShaderInfoLog"));
+		glCreateProgram = reinterpret_cast<PFNGLCREATEPROGRAMPROC>(wglGetProcAddress("glCreateProgram"));
+		glAttachShader = reinterpret_cast<PFNGLATTACHSHADERPROC>(wglGetProcAddress("glAttachShader"));
+		glLinkProgram = reinterpret_cast<PFNGLLINKPROGRAMPROC>(wglGetProcAddress("glLinkProgram"));
+		glValidateProgram = reinterpret_cast<PFNGLVALIDATEPROGRAMPROC>(wglGetProcAddress("glValidateProgram"));
+		glGetProgramiv = reinterpret_cast<PFNGLGETPROGRAMIVPROC>(wglGetProcAddress("glGetProgramiv"));
+		glGenBuffers = reinterpret_cast<PFNGLGENBUFFERSPROC>(wglGetProcAddress("glGenBuffers"));
+		glGenVertexArrays = reinterpret_cast<PFNGLGENVERTEXARRAYSPROC>(wglGetProcAddress("glGenVertexArrays"));
+		glGetAttribLocation = reinterpret_cast<PFNGLGETATTRIBLOCATIONPROC>(wglGetProcAddress("glGetAttribLocation"));
+		glBindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(wglGetProcAddress("glBindVertexArray"));
+		glEnableVertexAttribArray = reinterpret_cast<PFNGLENABLEVERTEXATTRIBARRAYPROC>(wglGetProcAddress("glEnableVertexAttribArray"));
+		glVertexAttribPointer = reinterpret_cast<PFNGLVERTEXATTRIBPOINTERPROC>(wglGetProcAddress("glVertexAttribPointer"));
+		glBindBuffer = reinterpret_cast<PFNGLBINDBUFFERPROC>(wglGetProcAddress("glBindBuffer"));
+		glBufferData = reinterpret_cast<PFNGLBUFFERDATAPROC>(wglGetProcAddress("glBufferData"));
+		glGetVertexAttribPointerv = reinterpret_cast<PFNGLGETVERTEXATTRIBPOINTERVPROC>(wglGetProcAddress("glGetVertexAttribPointerv"));
+		glUseProgram = reinterpret_cast<PFNGLUSEPROGRAMPROC>(wglGetProcAddress("glUseProgram"));
+		glDeleteVertexArrays = reinterpret_cast<PFNGLDELETEVERTEXARRAYSPROC>(wglGetProcAddress("glDeleteVertexArrays"));
+		glDeleteBuffers = reinterpret_cast<PFNGLDELETEBUFFERSPROC>(wglGetProcAddress("glDeleteBuffers"));
+		glDeleteProgram = reinterpret_cast<PFNGLDELETEPROGRAMPROC>(wglGetProcAddress("glDeleteProgram"));
+		glDeleteShader = reinterpret_cast<PFNGLDELETESHADERPROC>(wglGetProcAddress("glDeleteShader"));
+	}
+}
+
+static void
+initShader()
+{
+	if (err.code == ERR_NONE)
+	{
+		shader.vertexId = glCreateShader(GL_VERTEX_SHADER);
+		shader.fragmentId = glCreateShader(GL_FRAGMENT_SHADER);
+
+		glShaderSource(shader.vertexId, 1, &shader.vertex, NULL);
+		glShaderSource(shader.fragmentId, 1, &shader.fragment, NULL);
+
+		glCompileShader(shader.vertexId);
+		glCompileShader(shader.fragmentId);
+
+		checkShader(shader.vertexId);
+		checkShader(shader.fragmentId);
+	}
+}
+
+static void
+initProgram()
+{
+	if (err.code == ERR_NONE)
+	{
+		program.id = glCreateProgram();
+		glAttachShader(program.id, shader.vertexId);
+		glAttachShader(program.id, shader.fragmentId);
+		glLinkProgram(program.id);
+		checkProgram(program.id, GL_LINK_STATUS);
+
+		if (err.code == ERR_NONE)
+		{
+			glValidateProgram(program.id);
+			checkProgram(program.id, GL_VALIDATE_STATUS);
+		}
+	}
+}
+
+static void
+initVertexObjects()
+{
+	if (err.code == ERR_NONE)
+	{
+		GLint positionLocation = glGetAttribLocation(program.id, "positionIn");
+		GLint colorLocation = glGetAttribLocation(program.id, "colorIn");
+
+		glGenBuffers(1, &program.vbo);
+		glGenVertexArrays(1, &program.vao);
+
+		// x, y, z, r, g, b (triangle)
+		float vertices[] = {
+			0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0,
+			1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0,
+			-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0,
+		};
+		glBindVertexArray(program.vao);
+		glEnableVertexAttribArray(positionLocation);
+		glEnableVertexAttribArray(colorLocation);
+
+		glBindBuffer(GL_ARRAY_BUFFER, program.vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+		glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(0));
+		glVertexAttribPointer(colorLocation, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(3 * sizeof(float)));
+
+		glUseProgram(program.id);
+	}
+}
+
+int APIENTRY
+wWinMain(_In_     HINSTANCE hInstance,
+         _In_opt_ HINSTANCE hPrevInstance,
+         _In_     LPWSTR    lpCmdLine,
+         _In_     int       nCmdShow)
 {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 
-	if (!MyRegisterClass(hInstance))
-	{
-		MessageBox(NULL, L"RegisterClass() failed: Cannot create a window.", L"Error", MB_OK);
-		return FALSE;
-	}
-	if (!InitInstance(hInstance, nCmdShow))
-	{
-		MessageBox(NULL, L"CreateWindow() failed: Can not create a window.", L"Error", MB_OK);
-		return FALSE;
-	}
-	if (!CreateRenderContext(hInstance))
-	{
-		MessageBox(NULL, L"wglCreateContext() failed: Can not create an OpenGL context.", L"Error", MB_OK);
-		return FALSE;
-	}
-	wglMakeCurrent(hDC, hRC);
-	InitGLFunctions();
-	InitShaders();
+	registerClass(hInstance);
+	createFakeWindow(hInstance);
+	createFakeContext();
+	createWindow(hInstance);
+	createContext();
+	destroyFakeWindow();
+	wglMakeCurrent(window.deviceContext, window.renderContext);
+	initOpenGLFunctions();
+	initShader();
+	initProgram();
+	initVertexObjects();
 
-	ShowWindow(hWnd, nCmdShow);
-	UpdateWindow(hWnd);
-
-	MSG msg;
-
-	/* main loop */
-	while (GetMessage(&msg, nullptr, 0, 0))
+	if (err.code == ERR_NONE)
 	{
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
+		/* enable vsync */
+		if (wglSwapIntervalEXT)
+			wglSwapIntervalEXT(1);
+		centerWindow();
+		ShowWindow(window.hndl, nCmdShow);
+		UpdateWindow(window.hndl);
+		window.visible = true;
+
+		MSG msg;
+		while (window.visible)
+		{
+			while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE))
+			{
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}
+			draw();
+		}
+	}
+	else
+	{
+		wchar_t *title = new wchar_t[10];
+		swprintf_s(title, 10, L"Error %d", err.code);
+		MessageBox(NULL, err.message, title, MB_OK);
+		delete[] title;
 	}
 
-	return (int)msg.wParam;
+	return err.code;
 }
