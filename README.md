@@ -1,9 +1,7 @@
 # OpenGL Win32 Example
 
 ## About
-OpenGL Win32 Example is a program that creates a window with OpenGL 1.0 context. Example for OpenGL 3.0 is [another branch](https://github.com/vbsw/opengl-win32-example/tree/3.0).
-
-OpenGL Win32 Example is published on <https://github.com/vbsw/opengl-win32-example>.
+OpenGL Win32 Example is a program that creates a window with OpenGL 1.0 context. Example with OpenGL 3.0 context is on [other branch](https://github.com/vbsw/opengl-win32-example/tree/3.0). OpenGL Win32 Example is published on <https://github.com/vbsw/opengl-win32-example>.
 
 ## Copyright
 Copyright 2020, Vitali Baumtrok (vbsw@mailbox.org).
