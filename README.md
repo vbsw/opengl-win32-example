@@ -22,4 +22,4 @@ In Visual Studio right click on project and select properties. Add "OpenGL32.lib
 - <https://git-scm.com/book/en/v2/Getting-Started-Installing-Git>
 - <https://docs.microsoft.com/en-us/windows/desktop/learnwin32/closing-the-window>
 - <https://www.opengl.org/archives/resources/code/samples/win32_tutorial/>
-- https://mariuszbartosik.com/opengl-4-x-initialization-in-windows-without-a-framework/
+- <https://mariuszbartosik.com/opengl-4-x-initialization-in-windows-without-a-framework/>
